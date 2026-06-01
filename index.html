@@ -1,0 +1,619 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Priorização de Pitches — Amazon Music BR</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+firebase.initializeApp({
+  apiKey: "AIzaSyCKALAGJtAIqGt1uLav6vKN5kLMbESiFok",
+  authDomain: "priorizacao-pitches.firebaseapp.com",
+  databaseURL: "https://priorizacao-pitches-default-rtdb.firebaseio.com",
+  projectId: "priorizacao-pitches",
+  storageBucket: "priorizacao-pitches.firebasestorage.app",
+  messagingSenderId: "319268225823",
+  appId: "1:319268225823:web:643040cf40ccf3c448662a"
+});
+const db = firebase.database();
+</script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1923; color: #e0e0e0; padding: 20px; }
+h1 { color: #25d1da; margin-bottom: 8px; font-size: 1.5rem; }
+.subtitle { color: #888; margin-bottom: 24px; font-size: 0.9rem; }
+.upload-section { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+.upload-box { flex: 1; min-width: 280px; border: 2px dashed #333; border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; transition: border-color 0.2s; }
+.upload-box:hover, .upload-box.dragover { border-color: #25d1da; }
+.upload-box.loaded { border-color: #4caf50; border-style: solid; }
+.upload-box h3 { color: #25d1da; margin-bottom: 8px; font-size: 0.95rem; }
+.upload-box p { color: #666; font-size: 0.8rem; }
+.upload-box .status { margin-top: 8px; font-size: 0.8rem; color: #4caf50; }
+input[type="file"] { display: none; }
+.controls { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+button { background: #25d1da; color: #0f1923; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 0.85rem; }
+button:hover { background: #1fb8c0; }
+button:disabled { background: #333; color: #666; cursor: not-allowed; }
+button.secondary { background: #333; color: #e0e0e0; }
+button.secondary:hover { background: #444; }
+.stats { font-size: 0.8rem; color: #888; margin-left: auto; }
+.filter-bar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.filter-bar select, .filter-bar input { background: #1a2733; border: 1px solid #333; color: #e0e0e0; padding: 6px 10px; border-radius: 4px; font-size: 0.8rem; }
+.table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid #222; }
+table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+th { background: #1a2733; color: #25d1da; padding: 10px 12px; text-align: left; position: sticky; top: 0; cursor: pointer; white-space: nowrap; user-select: none; }
+th:hover { background: #243442; }
+td { padding: 8px 12px; border-top: 1px solid #1a2733; }
+tr:hover { background: #1a2733; }
+.prio-cell { width: 60px; }
+.prio-cell input { width: 40px; background: #0f1923; border: 1px solid #333; color: #fff; text-align: center; padding: 4px; border-radius: 3px; font-size: 0.85rem; }
+.prio-0 { background: #1b3a2a; }
+.prio-1 { background: #1a3328; }
+.prio-2 { background: #2a2f1a; }
+.prio-3 { background: #2f2a1a; }
+.prio-4 { background: #2f1f1a; }
+.prio-5 { background: #2a1a1a; }
+.prio-empty { background: #1a1a2a; }
+.badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600; }
+.badge-tier1 { background: #ffd700; color: #000; }
+.badge-tier2 { background: #c0c0c0; color: #000; }
+.badge-tier3 { background: #555; color: #ccc; }
+.badge-genre { background: #25d1da33; color: #25d1da; margin-left: 4px; }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<h1>🎵 Priorização de Pitches — Amazon Music BR</h1>
+<p class="subtitle">Upload dos CSVs do Maestro e DataRetriever para gerar ranking automático <span id="syncStatus" style="color:#4caf50;font-size:0.75rem;">● Conectado (real-time)</span></p>
+
+<div class="nav-tabs" style="display:flex;gap:8px;margin-bottom:20px;">
+  <button id="tabCurrent" onclick="switchTab('current')">📋 Semana Atual</button>
+  <button id="tabHistory" class="secondary" onclick="switchTab('history')">📅 Histórico</button>
+</div>
+
+<div id="pageCurrent">
+<div class="upload-section">
+  <div class="upload-box" id="maestroBox" onclick="document.getElementById('maestroFile').click()">
+    <h3>📋 Maestro (Pitches)</h3>
+    <p>Brazil - All Submissions.csv</p>
+    <div class="status" id="maestroStatus"></div>
+    <input type="file" id="maestroFile" accept=".csv">
+  </div>
+  <div class="upload-box" id="streamsBox" onclick="document.getElementById('streamsFile').click()">
+    <h3>📊 DataRetriever (Streams)</h3>
+    <p>BR_Artist_Charts_(T365D).csv</p>
+    <div class="status" id="streamsStatus"></div>
+    <input type="file" id="streamsFile" accept=".csv">
+    <button class="secondary" style="margin-top:10px;font-size:0.75rem;" onclick="event.stopPropagation(); clearStreams();">↺ Atualizar ranking</button>
+  </div>
+</div>
+
+<div class="controls">
+  <button id="runBtn" disabled onclick="runPrioritization()">▶ Calcular Priorização</button>
+  <button class="secondary" onclick="sortByPrio()">⇅ Reordenar por Prio</button>
+  <button class="secondary" onclick="exportCSV()">⬇ CSV</button>
+  <button class="secondary" onclick="exportXLSX()">⬇ Excel</button>
+  <button class="secondary" onclick="resetAll()">↺ Reset</button>
+  <button class="secondary" onclick="showOverrides()">📌 Overrides</button>
+  <button class="secondary" onclick="saveWeek()">💾 Salvar Semana</button>
+  <span class="stats" id="stats"></span>
+</div>
+
+<div class="filter-bar">
+  <select id="filterPrio" onchange="applyFilters()">
+    <option value="">Todas as Prios</option>
+    <option value="0">Prio 0</option>
+    <option value="1">Prio 1</option>
+    <option value="2">Prio 2</option>
+    <option value="3">Prio 3</option>
+    <option value="4">Prio 4</option>
+    <option value="5">Prio 5</option>
+    <option value="empty">Sem score</option>
+  </select>
+  <select id="filterGenre" onchange="applyFilters()">
+    <option value="">Todos os Gêneros</option>
+  </select>
+  <input type="text" id="filterArtist" placeholder="Buscar artista..." oninput="applyFilters()">
+</div>
+
+<div class="table-wrap">
+  <table id="resultsTable">
+    <thead><tr><th>Tabela aparecerá após calcular</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div><!-- /table-wrap -->
+</div><!-- /pageCurrent -->
+
+<div id="pageHistory" style="display:none;">
+  <h2 style="color:#25d1da;font-size:1.1rem;margin-bottom:12px;">📅 Histórico Mensal</h2>
+  <div id="monthTabs" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;"></div>
+  <div id="weekTabs" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;"></div>
+  <div class="table-wrap"><table id="historyTable"><tbody></tbody></table></div>
+</div>
+
+<script>
+let maestroData = null, streamsData = null, results = [], sortCol = 0, sortAsc = true;
+
+function clearStreams() {
+  localStorage.removeItem('streamsData');
+  streamsData = null; streamsCols = {};
+  document.getElementById('streamsBox').classList.remove('loaded');
+  document.getElementById('streamsStatus').textContent = 'Clique para carregar novo ranking';
+  checkReady();
+}
+
+const LOCAL_GENRES = ["sertanejo","pagode","funk","mpb","gospel","trap","rap","brazilian"];
+const RANK_THRESHOLDS = [[50,0],[150,1],[300,2],[500,3],[1000,4]];
+
+function detectSeparator(text) {
+  // Find a line that looks like a header (has many separated fields)
+  const lines = text.split(/\r?\n/).slice(0, 30);
+  for (const line of lines) {
+    const tabs = (line.match(/\t/g) || []).length;
+    const commas = (line.match(/,/g) || []).length;
+    const semis = (line.match(/;/g) || []).length;
+    if (tabs > 5 || commas > 5 || semis > 5) {
+      if (tabs >= commas && tabs >= semis) return '\t';
+      if (semis > commas) return ';';
+      return ',';
+    }
+  }
+  return ',';
+}
+
+function parseCSV(text) {
+  // Remove BOM
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const sep = detectSeparator(text);
+  const lines = text.split('\n');
+
+  // Find header row: the first line with the most non-empty fields
+  let startIdx = 0, maxNonEmpty = 0;
+  for (let i = 0; i < Math.min(lines.length, 30); i++) {
+    const fields = parseLine(lines[i], sep);
+    const nonEmpty = fields.filter(f => f.length > 0).length;
+    if (nonEmpty > maxNonEmpty) { maxNonEmpty = nonEmpty; startIdx = i; }
+  }
+
+  const rows = [];
+  for (let i = startIdx; i < lines.length; i++) {
+    const row = parseLine(lines[i], sep);
+    if (row.filter(f => f.length > 0).length > 1) rows.push(row);
+  }
+  return rows;
+}
+
+function parseLine(line, sep) {
+  const result = []; let current = '', inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') { inQuotes = !inQuotes; }
+    else if (ch === sep && !inQuotes) { result.push(current.trim()); current = ''; }
+    else { current += ch; }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function normalize(text) {
+  return (text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+function setupDragDrop(boxId, fileId, onLoad) {
+  const box = document.getElementById(boxId);
+  const input = document.getElementById(fileId);
+  ['dragenter','dragover'].forEach(e => box.addEventListener(e, ev => { ev.preventDefault(); box.classList.add('dragover'); }));
+  ['dragleave','drop'].forEach(e => box.addEventListener(e, ev => { ev.preventDefault(); box.classList.remove('dragover'); }));
+  box.addEventListener('drop', ev => { if (ev.dataTransfer.files[0]) loadFile(ev.dataTransfer.files[0], onLoad, boxId); });
+  input.addEventListener('change', ev => { if (ev.target.files[0]) loadFile(ev.target.files[0], onLoad, boxId); });
+}
+
+function loadFile(file, callback, boxId) {
+  const reader = new FileReader();
+  reader.onload = e => { callback(e.target.result, file.name); document.getElementById(boxId).classList.add('loaded'); checkReady(); };
+  reader.readAsText(file, 'utf-8');
+}
+
+function checkReady() { document.getElementById('runBtn').disabled = !(maestroData && streamsData); }
+
+// Load streams from localStorage on page load
+(function() {
+  const savedStreams = localStorage.getItem('streamsData');
+  if (savedStreams) {
+    streamsData = JSON.parse(savedStreams);
+    document.getElementById('streamsBox').classList.add('loaded');
+    document.getElementById('streamsStatus').textContent = `✓ ${streamsData.length - 1} artistas (salvo localmente)`;
+    checkReady();
+  }
+})();
+
+function findCol(headers, patterns) {
+  const h = headers.map(c => c.toLowerCase().trim());
+  for (const p of patterns) {
+    const idx = h.findIndex(c => c.includes(p));
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+let maestroCols = {}, streamsCols = {};
+
+setupDragDrop('maestroBox', 'maestroFile', (text, name) => {
+  maestroData = parseCSV(text);
+  const h = maestroData[0];
+  maestroCols.artist = findCol(h, ['portal project: artist', 'artist']);
+  maestroCols.genre = findCol(h, ['primary genre', 'genre']);
+  maestroCols.title = findCol(h, ['name & type', 'name']);
+  maestroCols.focusTrack = findCol(h, ['focus track']);
+  maestroCols.trackAsin = findCol(h, ['global asin(focus track)', 'asin(focus']);
+  maestroCols.albumAsin = findCol(h, ['global asin(album)', 'asin(album']);
+  const missing = [];
+  if (maestroCols.artist < 0) missing.push('Artist');
+  if (maestroCols.genre < 0) missing.push('Genre');
+  document.getElementById('maestroStatus').textContent = missing.length
+    ? `⚠ Colunas não encontradas: ${missing.join(', ')} | Headers: ${h.slice(0,12).join(' | ')}`
+    : `✓ ${maestroData.length - 1} pitches | Artist=col${maestroCols.artist} Genre=col${maestroCols.genre}`;
+  document.getElementById('maestroBox').classList.toggle('loaded', !missing.length);
+});
+
+setupDragDrop('streamsBox', 'streamsFile', (text, name) => {
+  streamsData = parseCSV(text);
+  localStorage.setItem('streamsData', JSON.stringify(streamsData));
+  const h = streamsData[0];
+  streamsCols.rank = findCol(h, ['total rank', 'rank']);
+  streamsCols.artist = findCol(h, ['artist name', 'artist']);
+  streamsCols.tier = findCol(h, ['artist tier', 'tier']);
+  streamsCols.territory = findCol(h, ['artist mapped local territory', 'mapped local territory']);
+  const missing = [];
+  if (streamsCols.rank < 0) missing.push('Rank');
+  if (streamsCols.artist < 0) missing.push('Artist');
+  if (streamsCols.tier < 0) missing.push('Tier');
+  document.getElementById('streamsStatus').textContent = missing.length
+    ? `⚠ Colunas não encontradas: ${missing.join(', ')} | Headers: ${h.slice(0,12).join(' | ')}`
+    : `✓ ${streamsData.length - 1} artistas | Rank=col${streamsCols.rank} Artist=col${streamsCols.artist} Tier=col${streamsCols.tier}`;
+  document.getElementById('streamsBox').classList.toggle('loaded', !missing.length);
+});
+
+function runPrioritization() {
+  // Ensure streamsCols are set (needed when loaded from localStorage)
+  if (!streamsCols.artist || streamsCols.artist < 0) {
+    const h = streamsData[0];
+    streamsCols.rank = findCol(h, ['total rank', 'rank']);
+    streamsCols.artist = findCol(h, ['artist name', 'artist']);
+    streamsCols.tier = findCol(h, ['artist tier', 'tier']);
+  }
+  // Build rank/tier maps from streams
+  const rankMap = new Map(), tierMap = new Map(), territoryMap = new Map();
+  for (let i = 1; i < streamsData.length; i++) {
+    const row = streamsData[i];
+    const artist = normalize(row[streamsCols.artist] || '');
+    const rank = parseInt(row[streamsCols.rank]);
+    const tier = (row[streamsCols.tier] || '').toLowerCase().trim();
+    const territory = (row[streamsCols.territory] || '').toLowerCase().trim();
+    if (artist && rank > 0) {
+      if (!rankMap.has(artist) || rank < rankMap.get(artist)) {
+        rankMap.set(artist, rank);
+        tierMap.set(artist, tier);
+        territoryMap.set(artist, territory);
+      }
+    }
+  }
+
+  // Process pitches
+  results = [];
+  let ranked = 0, notFound = 0;
+  const genres = new Set();
+
+  for (let i = 1; i < maestroData.length; i++) {
+    const row = maestroData[i];
+    const artistRaw = row[maestroCols.artist] || '';
+    // Extract first artist from compound fields (separated by , & "e" featuring feat feat.)
+    const firstArtist = artistRaw.split(/,|&|\sfeaturing\s|\sfeat\.?\s|\se\s/i)[0].trim();
+    const artistNorm = normalize(firstArtist);
+    const genre = (row[maestroCols.genre] || '').trim();
+    if (genre) genres.add(genre);
+    if (!artistNorm) continue;
+
+    const rank = rankMap.get(artistNorm);
+    let score = null;
+
+    if (rank !== undefined) {
+      score = 5;
+      for (const [threshold, s] of RANK_THRESHOLDS) { if (rank <= threshold) { score = s; break; } }
+      // Tier cap
+      const tier = tierMap.get(artistNorm) || '';
+      if (tier.includes('1') && score > 1) score = 1;
+      else if (tier.includes('2') && score > 2) score = 2;
+      // Genre bonus
+      if (LOCAL_GENRES.some(g => genre.toLowerCase().includes(g))) score = Math.max(0, score - 1);
+      // Brazilian artist bonus
+      const territory = territoryMap.get(artistNorm) || '';
+      if (territory.includes('latam') || territory.includes('brazil') || territory.includes('br')) score = Math.max(0, score - 1);
+      // Apply manual override if exists
+      const overrides = JSON.parse(localStorage.getItem('prioOverrides') || '{}');
+      if (artistNorm in overrides) score = overrides[artistNorm];
+      ranked++;
+    } else { notFound++; }
+
+    results.push({ idx: i, prio: score, artist: artistRaw, genre, rank: rank || null, tier: tierMap.get(artistNorm) || '', title: (row[maestroCols.title] || '').replace(/<[^>]*>/g, ''), focusTrack: row[maestroCols.focusTrack] || '', trackAsin: row[maestroCols.trackAsin] || '', albumAsin: row[maestroCols.albumAsin] || '', faceout: '', row });
+  }
+
+  document.getElementById('stats').textContent = `${ranked} rankeados | ${notFound} sem score | ${results.length} total`;
+
+  // Populate genre filter
+  const genreSelect = document.getElementById('filterGenre');
+  genreSelect.innerHTML = '<option value="">Todos os Gêneros</option>';
+  [...genres].sort().forEach(g => { genreSelect.innerHTML += `<option value="${g}">${g}</option>`; });
+
+  sortCol = 0; sortAsc = true;
+  renderTable();
+
+  // Sync results to Firebase
+  const syncData = results.map(r => ({ idx: r.idx, prio: r.prio, artist: r.artist, genre: r.genre, rank: r.rank, tier: r.tier, title: r.title, focusTrack: r.focusTrack, trackAsin: r.trackAsin, albumAsin: r.albumAsin, faceout: r.faceout }));
+  db.ref('currentWeek').set({ results: syncData, updatedAt: Date.now() });
+}
+
+function renderTable() {
+  const filtered = getFiltered();
+  const sorted = [...filtered].sort((a, b) => {
+    let va, vb;
+    if (sortCol === 0) { va = a.prio ?? 99; vb = b.prio ?? 99; }
+    else if (sortCol === 1) { va = a.artist.toLowerCase(); vb = b.artist.toLowerCase(); }
+    else if (sortCol === 2) { va = a.title.toLowerCase(); vb = b.title.toLowerCase(); }
+    else if (sortCol === 3) { va = a.genre.toLowerCase(); vb = b.genre.toLowerCase(); }
+    else if (sortCol === 4) { va = a.focusTrack.toLowerCase(); vb = b.focusTrack.toLowerCase(); }
+    else if (sortCol === 5) { va = a.trackAsin; vb = b.trackAsin; }
+    else if (sortCol === 6) { va = a.albumAsin; vb = b.albumAsin; }
+    else if (sortCol === 7) { va = a.rank ?? 99999; vb = b.rank ?? 99999; }
+    else if (sortCol === 8) { va = a.tier; vb = b.tier; }
+    if (va < vb) return sortAsc ? -1 : 1;
+    if (va > vb) return sortAsc ? 1 : -1;
+    return 0;
+  });
+
+  const table = document.getElementById('resultsTable');
+  table.innerHTML = `<thead><tr>
+    <th>#</th>
+    <th onclick="sortBy(0)">Prio ${sortCol===0?(sortAsc?'↑':'↓'):''}</th>
+    <th onclick="sortBy(1)">Artista ${sortCol===1?(sortAsc?'↑':'↓'):''}</th>
+    <th onclick="sortBy(2)">Title</th>
+    <th onclick="sortBy(3)">Gênero ${sortCol===3?(sortAsc?'↑':'↓'):''}</th>
+    <th onclick="sortBy(4)">Priority Track</th>
+    <th onclick="sortBy(5)">Track ASIN</th>
+    <th onclick="sortBy(6)">Album ASIN</th>
+    <th onclick="sortBy(7)">Rank ${sortCol===7?(sortAsc?'↑':'↓'):''}</th>
+    <th onclick="sortBy(8)">Tier ${sortCol===8?(sortAsc?'↑':'↓'):''}</th>
+    <th>Faceout</th>
+  </tr></thead><tbody></tbody>`;
+
+  const tbody = table.querySelector('tbody');
+  sorted.forEach((r, i) => {
+    const prioClass = r.prio !== null ? `prio-${r.prio}` : 'prio-empty';
+    const tierBadge = r.tier.includes('1') ? '<span class="badge badge-tier1">T1</span>' :
+                      r.tier.includes('2') ? '<span class="badge badge-tier2">T2</span>' :
+                      r.tier ? '<span class="badge badge-tier3">T3</span>' : '';
+    const genreBadge = LOCAL_GENRES.some(g => r.genre.toLowerCase().includes(g)) ? '<span class="badge badge-genre">Local</span>' : '';
+    const tr = document.createElement('tr');
+    tr.className = prioClass;
+    tr.innerHTML = `
+      <td style="color:#666;text-align:center">${i + 1}</td>
+      <td class="prio-cell"><input type="number" min="0" max="5" value="${r.prio ?? ''}" data-idx="${r.idx}" onchange="updatePrio(this)"></td>
+      <td>${r.artist}</td>
+      <td>${r.title.replace(/<[^>]*>/g,'').replace(/&lt;[^&]*&gt;/g,'')}</td>
+      <td>${r.genre} ${genreBadge}</td>
+      <td>${r.focusTrack}</td>
+      <td style="font-size:0.7rem">${r.trackAsin}</td>
+      <td style="font-size:0.7rem">${r.albumAsin}</td>
+      <td>${r.rank || '—'}</td>
+      <td>${tierBadge}</td>
+      <td class="prio-cell"><input type="text" value="${r.faceout}" data-idx="${r.idx}" onchange="updateFaceout(this)" style="width:160px"></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function updatePrio(input) {
+  const idx = parseInt(input.dataset.idx);
+  const val = input.value === '' ? null : Math.max(0, Math.min(5, parseInt(input.value)));
+  const r = results.find(r => r.idx === idx);
+  if (r) {
+    r.prio = val;
+    // Save override locally
+    if (val !== null) {
+      const overrides = JSON.parse(localStorage.getItem('prioOverrides') || '{}');
+      overrides[normalize(r.artist.split(/,|&|\sfeaturing\s|\sfeat\.?\s|\se\s/i)[0].trim())] = val;
+      localStorage.setItem('prioOverrides', JSON.stringify(overrides));
+    }
+    // Sync to Firebase
+    db.ref('currentWeek/results/' + idx).update({ prio: val });
+  }
+  input.closest('tr').className = val !== null ? `prio-${val}` : 'prio-empty';
+}
+
+function updateFaceout(input) {
+  const idx = parseInt(input.dataset.idx);
+  const r = results.find(r => r.idx === idx);
+  if (r) {
+    r.faceout = input.value;
+    db.ref('currentWeek/results/' + idx).update({ faceout: input.value });
+  }
+}
+
+function sortByPrio() { sortCol = 0; sortAsc = true; renderTable(); }
+
+function switchTab(tab) {
+  document.getElementById('pageCurrent').style.display = tab === 'current' ? '' : 'none';
+  document.getElementById('pageHistory').style.display = tab === 'history' ? '' : 'none';
+  document.getElementById('tabCurrent').className = tab === 'current' ? '' : 'secondary';
+  document.getElementById('tabHistory').className = tab === 'history' ? '' : 'secondary';
+  if (tab === 'history') renderHistory();
+}
+
+// Firebase real-time listener
+let firebaseListenerActive = false;
+function startFirebaseListener() {
+  if (firebaseListenerActive) return;
+  firebaseListenerActive = true;
+  db.ref('currentWeek/results').on('value', snap => {
+    const data = snap.val();
+    if (!data || !Array.isArray(data)) return;
+    // If we have no local results, load from Firebase
+    if (!results.length) {
+      results = data.map(r => ({ ...r }));
+      document.getElementById('stats').textContent = `${results.filter(r=>r.prio!==null).length} rankeados | ${results.filter(r=>r.prio===null).length} sem score | ${results.length} total (sync)`;
+      renderTable();
+    } else {
+      // Update only prio and faceout from Firebase
+      let changed = false;
+      data.forEach(remote => {
+        const local = results.find(r => r.idx === remote.idx);
+        if (local && (local.prio !== remote.prio || local.faceout !== remote.faceout)) {
+          local.prio = remote.prio;
+          local.faceout = remote.faceout;
+          changed = true;
+        }
+      });
+      if (changed) renderTable();
+    }
+  });
+}
+startFirebaseListener();
+
+// Connection status
+db.ref('.info/connected').on('value', snap => {
+  document.getElementById('syncStatus').innerHTML = snap.val()
+    ? '● Conectado (real-time)'
+    : '<span style="color:#f44336">● Desconectado</span>';
+  document.getElementById('syncStatus').style.color = snap.val() ? '#4caf50' : '#f44336';
+});
+
+function showOverrides() {
+  const overrides = JSON.parse(localStorage.getItem('prioOverrides') || '{}');
+  const entries = Object.entries(overrides);
+  if (!entries.length) { alert('Nenhum override salvo.'); return; }
+  const msg = entries.map(([a, s]) => `${a} → ${s}`).join('\n');
+  if (confirm(`${entries.length} overrides salvos:\n\n${msg}\n\nDeseja limpar todos?`)) {
+    localStorage.removeItem('prioOverrides');
+    alert('Overrides removidos.');
+  }
+}
+
+function sortBy(col) { if (sortCol === col) sortAsc = !sortAsc; else { sortCol = col; sortAsc = true; } renderTable(); }
+
+function getFiltered() {
+  const prio = document.getElementById('filterPrio').value;
+  const genre = document.getElementById('filterGenre').value;
+  const artist = normalize(document.getElementById('filterArtist').value);
+  return results.filter(r => {
+    if (prio === 'empty' && r.prio !== null) return false;
+    if (prio !== '' && prio !== 'empty' && r.prio !== parseInt(prio)) return false;
+    if (genre && r.genre !== genre) return false;
+    if (artist && !normalize(r.artist).includes(artist)) return false;
+    return true;
+  });
+}
+
+function applyFilters() { renderTable(); }
+
+function exportXLSX() {
+  if (!results.length) return;
+  const headers = ['Prio','Artist','Title','Genre','Priority Track','Track ASIN','Album ASIN','Rank','Tier','Faceout'];
+  const sorted = [...results].sort((a,b) => (a.prio ?? 99) - (b.prio ?? 99));
+  const rows = sorted.map(r => [r.prio ?? '', r.artist, r.title, r.genre, r.focusTrack, r.trackAsin, r.albumAsin, r.rank || '', r.tier, r.faceout]);
+
+  // Build XML spreadsheet (compatible with Excel)
+  let xml = '<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?>';
+  xml += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">';
+  xml += '<Worksheet ss:Name="Priorizacao"><Table>';
+  xml += '<Row>' + headers.map(h => `<Cell><Data ss:Type="String">${h}</Data></Cell>`).join('') + '</Row>';
+  rows.forEach(row => {
+    xml += '<Row>' + row.map(v => {
+      const type = typeof v === 'number' ? 'Number' : 'String';
+      return `<Cell><Data ss:Type="${type}">${String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</Data></Cell>`;
+    }).join('') + '</Row>';
+  });
+  xml += '</Table></Worksheet></Workbook>';
+
+  const blob = new Blob([xml], {type: 'application/vnd.ms-excel'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `priorizacao_${new Date().toISOString().slice(0,10)}.xls`; a.click();
+}
+
+function exportCSV() {
+  if (!results.length) return;
+  const headers = ['Prio','Artist','Title','Genre','Priority Track','Track ASIN','Album ASIN','Rank','Tier','Faceout'];
+  const sorted = [...results].sort((a,b) => (a.prio ?? 99) - (b.prio ?? 99));
+  const lines = [headers.join(','), ...sorted.map(r => [r.prio ?? '', `"${r.artist}"`, `"${r.title}"`, `"${r.genre}"`, `"${r.focusTrack}"`, r.trackAsin, r.albumAsin, r.rank || '', r.tier, `"${r.faceout}"`].join(','))];
+  const blob = new Blob([lines.join('\n')], {type: 'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `priorizacao_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+}
+
+function resetAll() { maestroData = null; results = []; document.querySelectorAll('.upload-box')[0].classList.remove('loaded'); document.getElementById('maestroStatus').textContent = ''; document.getElementById('stats').textContent = ''; document.getElementById('resultsTable').innerHTML = '<thead><tr><th>Tabela aparecerá após calcular</th></tr></thead>'; document.getElementById('runBtn').disabled = true; checkReady(); }
+
+// --- HISTORY ---
+function getHistory() { return JSON.parse(localStorage.getItem('weekHistory') || '{}'); }
+
+function saveWeek() {
+  if (!results.length) { alert('Nada para salvar. Calcule primeiro.'); return; }
+  const now = new Date();
+  const weekLabel = getWeekLabel(now);
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const history = getHistory();
+  if (!history[monthKey]) history[monthKey] = {};
+  history[monthKey][weekLabel] = results.map(r => ({
+    prio: r.prio, artist: r.artist, title: r.title, genre: r.genre,
+    focusTrack: r.focusTrack, trackAsin: r.trackAsin, albumAsin: r.albumAsin,
+    rank: r.rank, tier: r.tier, faceout: r.faceout
+  }));
+  localStorage.setItem('weekHistory', JSON.stringify(history));
+  alert(`Semana "${weekLabel}" salva!`);
+  renderHistory();
+}
+
+function getWeekLabel(date) {
+  const d = new Date(date); d.setHours(0,0,0,0);
+  d.setDate(d.getDate() - d.getDay()); // Sunday start
+  return `Sem ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+function renderHistory() {
+  const history = getHistory();
+  const months = Object.keys(history).sort().reverse();
+  if (!months.length) { return; }
+
+  const monthTabs = document.getElementById('monthTabs');
+  monthTabs.innerHTML = months.map((m, i) => `<button class="${i===0?'':'secondary'}" onclick="showMonth('${m}')" id="mtab-${m}">${m}</button>`).join('');
+  showMonth(months[0]);
+}
+
+function showMonth(monthKey) {
+  const history = getHistory();
+  document.querySelectorAll('#monthTabs button').forEach(b => b.className = 'secondary');
+  const tab = document.getElementById('mtab-' + monthKey);
+  if (tab) tab.className = '';
+
+  const weeks = Object.keys(history[monthKey] || {}).sort().reverse();
+  const weekTabsEl = document.getElementById('weekTabs');
+  weekTabsEl.innerHTML = weeks.map((w, i) => `<button class="${i===0?'':'secondary'}" onclick="showWeek('${monthKey}','${w}')" id="wtab-${w}">${w}</button>`).join('');
+  if (weeks.length) showWeek(monthKey, weeks[0]);
+}
+
+function showWeek(monthKey, weekKey) {
+  const history = getHistory();
+  document.querySelectorAll('#weekTabs button').forEach(b => b.className = 'secondary');
+  const tab = document.getElementById('wtab-' + weekKey);
+  if (tab) tab.className = '';
+
+  const data = history[monthKey][weekKey] || [];
+  const table = document.getElementById('historyTable');
+  table.innerHTML = `<thead><tr><th>#</th><th>Prio</th><th>Artista</th><th>Title</th><th>Gênero</th><th>Priority Track</th><th>Rank</th><th>Tier</th><th>Faceout</th></tr></thead><tbody>` +
+    data.sort((a,b) => (a.prio??99)-(b.prio??99)).map((r, i) => `<tr class="${r.prio !== null ? 'prio-'+r.prio : 'prio-empty'}">
+      <td style="color:#666">${i+1}</td><td>${r.prio ?? ''}</td><td>${r.artist}</td><td>${r.title}</td><td>${r.genre}</td><td>${r.focusTrack}</td><td>${r.rank||'—'}</td><td>${r.tier}</td><td>${r.faceout}</td></tr>`).join('') + '</tbody>';
+}
+
+
+</script>
+</body>
+</html>
