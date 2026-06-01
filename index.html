@@ -1,25 +1,10 @@
 
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Priorização de Pitches — Amazon Music BR</title>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
-<script>
-firebase.initializeApp({
-  apiKey: "AIzaSyCKALAGJtAIqGt1uLav6vKN5kLMbESiFok",
-  authDomain: "priorizacao-pitches.firebaseapp.com",
-  databaseURL: "https://priorizacao-pitches-default-rtdb.firebaseio.com",
-  projectId: "priorizacao-pitches",
-  storageBucket: "priorizacao-pitches.firebasestorage.app",
-  messagingSenderId: "319268225823",
-  appId: "1:319268225823:web:643040cf40ccf3c448662a"
-});
-const db = firebase.database();
-</script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1923; color: #e0e0e0; padding: 20px; }
@@ -68,7 +53,7 @@ tr:hover { background: #1a2733; }
 <body>
 
 <h1>🎵 Priorização de Pitches — Amazon Music BR</h1>
-<p class="subtitle">Upload dos CSVs do Maestro e DataRetriever para gerar ranking automático <span id="syncStatus" style="color:#4caf50;font-size:0.75rem;">● Conectado (real-time)</span></p>
+<p class="subtitle">Upload dos CSVs do Maestro e DataRetriever para gerar ranking automático</p>
 
 <div class="nav-tabs" style="display:flex;gap:8px;margin-bottom:20px;">
   <button id="tabCurrent" onclick="switchTab('current')">📋 Semana Atual</button>
@@ -352,10 +337,6 @@ function runPrioritization() {
 
   sortCol = 0; sortAsc = true;
   renderTable();
-
-  // Sync results to Firebase
-  const syncData = results.map(r => ({ idx: r.idx, prio: r.prio, artist: r.artist, genre: r.genre, rank: r.rank, tier: r.tier, title: r.title, focusTrack: r.focusTrack, trackAsin: r.trackAsin, albumAsin: r.albumAsin, faceout: r.faceout }));
-  db.ref('currentWeek').set({ results: syncData, updatedAt: Date.now() });
 }
 
 function renderTable() {
@@ -422,14 +403,11 @@ function updatePrio(input) {
   const r = results.find(r => r.idx === idx);
   if (r) {
     r.prio = val;
-    // Save override locally
     if (val !== null) {
       const overrides = JSON.parse(localStorage.getItem('prioOverrides') || '{}');
       overrides[normalize(r.artist.split(/,|&|\sfeaturing\s|\sfeat\.?\s|\se\s/i)[0].trim())] = val;
       localStorage.setItem('prioOverrides', JSON.stringify(overrides));
     }
-    // Sync to Firebase
-    db.ref('currentWeek/results/' + idx).update({ prio: val });
   }
   input.closest('tr').className = val !== null ? `prio-${val}` : 'prio-empty';
 }
@@ -437,10 +415,7 @@ function updatePrio(input) {
 function updateFaceout(input) {
   const idx = parseInt(input.dataset.idx);
   const r = results.find(r => r.idx === idx);
-  if (r) {
-    r.faceout = input.value;
-    db.ref('currentWeek/results/' + idx).update({ faceout: input.value });
-  }
+  if (r) r.faceout = input.value;
 }
 
 function sortByPrio() { sortCol = 0; sortAsc = true; renderTable(); }
@@ -452,44 +427,6 @@ function switchTab(tab) {
   document.getElementById('tabHistory').className = tab === 'history' ? '' : 'secondary';
   if (tab === 'history') renderHistory();
 }
-
-// Firebase real-time listener
-let firebaseListenerActive = false;
-function startFirebaseListener() {
-  if (firebaseListenerActive) return;
-  firebaseListenerActive = true;
-  db.ref('currentWeek/results').on('value', snap => {
-    const data = snap.val();
-    if (!data || !Array.isArray(data)) return;
-    // If we have no local results, load from Firebase
-    if (!results.length) {
-      results = data.map(r => ({ ...r }));
-      document.getElementById('stats').textContent = `${results.filter(r=>r.prio!==null).length} rankeados | ${results.filter(r=>r.prio===null).length} sem score | ${results.length} total (sync)`;
-      renderTable();
-    } else {
-      // Update only prio and faceout from Firebase
-      let changed = false;
-      data.forEach(remote => {
-        const local = results.find(r => r.idx === remote.idx);
-        if (local && (local.prio !== remote.prio || local.faceout !== remote.faceout)) {
-          local.prio = remote.prio;
-          local.faceout = remote.faceout;
-          changed = true;
-        }
-      });
-      if (changed) renderTable();
-    }
-  });
-}
-startFirebaseListener();
-
-// Connection status
-db.ref('.info/connected').on('value', snap => {
-  document.getElementById('syncStatus').innerHTML = snap.val()
-    ? '● Conectado (real-time)'
-    : '<span style="color:#f44336">● Desconectado</span>';
-  document.getElementById('syncStatus').style.color = snap.val() ? '#4caf50' : '#f44336';
-});
 
 function showOverrides() {
   const overrides = JSON.parse(localStorage.getItem('prioOverrides') || '{}');
