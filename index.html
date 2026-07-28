@@ -83,6 +83,7 @@ tr:hover { background: #1a2733; }
   <button class="secondary" onclick="exportXLSX()">⬇ Excel</button>
   <button class="secondary" onclick="resetAll()">↺ Reset</button>
   <button class="secondary" onclick="showOverrides()">📌 Overrides</button>
+  <button class="secondary" onclick="exportOverrides()">📤 Exportar Overrides</button>
   <label class="secondary" style="background:#333;color:#e0e0e0;padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:600;font-size:0.85rem;">📥 Importar Overrides<input type="file" accept=".json" onchange="importOverrides(this)" style="display:none"></label>
   <button class="secondary" onclick="saveWeek()">💾 Salvar Semana</button>
   <span class="stats" id="stats"></span>
@@ -481,9 +482,10 @@ function showOverrides() {
   const entries = Object.entries(overrides);
   if (!entries.length) { alert('Nenhum override salvo.'); return; }
   const msg = entries.map(([a, s]) => `${a} → ${s}`).join('\n');
-  const action = prompt(`${entries.length} overrides salvos:\n\n${msg}\n\nDigite: "exportar" para baixar JSON, "limpar" para remover todos, ou cancele.`);
-  if (action && action.toLowerCase().includes('limpar')) { localStorage.removeItem('prioOverrides'); alert('Overrides removidos.'); }
-  else if (action && action.toLowerCase().includes('exportar')) { exportOverrides(); }
+  if (confirm(`${entries.length} overrides salvos:\n\n${msg}\n\nDeseja limpar todos?`)) {
+    localStorage.removeItem('prioOverrides');
+    alert('Overrides removidos.');
+  }
 }
 
 function exportOverrides() {
