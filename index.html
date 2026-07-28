@@ -148,6 +148,7 @@ const SKIP_GENRES = ["classical","jazz","country","kids","folk","infantil","chil
 const RANK_THRESHOLDS = [[50,0],[150,1],[800,2],[1300,3],[2000,4]];
 
 function detectSeparator(text) {
+  // Find a line that looks like a header (has many separated fields)
   const lines = text.split(/\r?\n/).slice(0, 30);
   for (const line of lines) {
     const tabs = (line.match(/\t/g) || []).length;
@@ -163,16 +164,20 @@ function detectSeparator(text) {
 }
 
 function parseCSV(text) {
+  // Remove BOM
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
   text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const sep = detectSeparator(text);
   const lines = text.split('\n');
+
+  // Find header row: the first line with the most non-empty fields
   let startIdx = 0, maxNonEmpty = 0;
   for (let i = 0; i < Math.min(lines.length, 30); i++) {
     const fields = parseLine(lines[i], sep);
     const nonEmpty = fields.filter(f => f.length > 0).length;
     if (nonEmpty > maxNonEmpty) { maxNonEmpty = nonEmpty; startIdx = i; }
   }
+
   const rows = [];
   for (let i = startIdx; i < lines.length; i++) {
     const row = parseLine(lines[i], sep);
@@ -207,12 +212,15 @@ function setupDragDrop(boxId, fileId, onLoad) {
 }
 
 function loadFile(file, callback, boxId) {
+  // Try Latin-1 first (Maestro CSVs from Salesforce often use this encoding)
   const reader = new FileReader();
   reader.onload = e => {
     const latin1Text = e.target.result;
+    // Check if UTF-8 would be better (no high bytes mangled)
     const reader2 = new FileReader();
     reader2.onload = e2 => {
       const utf8Text = e2.target.result;
+      // Use UTF-8 if it has no replacement chars, otherwise use Latin-1
       const text = utf8Text.includes('\ufffd') ? latin1Text : utf8Text;
       callback(text, file.name);
       document.getElementById(boxId).classList.add('loaded');
@@ -225,6 +233,7 @@ function loadFile(file, callback, boxId) {
 
 function checkReady() { document.getElementById('runBtn').disabled = !(maestroData && streamsData); }
 
+// Load streams from localStorage on page load
 (function() {
   const savedStreams = localStorage.getItem('streamsData');
   if (savedStreams) {
@@ -290,12 +299,14 @@ setupDragDrop('streamsBox', 'streamsFile', (text, name) => {
 });
 
 function runPrioritization() {
+  // Ensure streamsCols are set (needed when loaded from localStorage)
   if (!streamsCols.artist || streamsCols.artist < 0) {
     const h = streamsData[0];
     streamsCols.rank = findCol(h, ['total rank', 'rank']);
     streamsCols.artist = findCol(h, ['artist name', 'artist']);
     streamsCols.tier = findCol(h, ['artist tier', 'tier']);
   }
+  // Build rank/tier maps from streams
   const rankMap = new Map(), tierMap = new Map(), territoryMap = new Map();
   for (let i = 1; i < streamsData.length; i++) {
     const row = streamsData[i];
@@ -312,6 +323,7 @@ function runPrioritization() {
     }
   }
 
+  // Process pitches
   results = [];
   let ranked = 0, notFound = 0;
   const genres = new Set();
@@ -319,12 +331,14 @@ function runPrioritization() {
   for (let i = 1; i < maestroData.length; i++) {
     const row = maestroData[i];
     const artistRaw = row[maestroCols.artist] || '';
+    // Extract first artist from compound fields (separated by , & "e" featuring feat feat.)
     const firstArtist = artistRaw.split(/,|&|\sfeaturing\s|\sfeat\.?\s|\se\s/i)[0].trim();
     const artistNorm = normalize(firstArtist);
     const genre = (row[maestroCols.genre] || '').trim();
     if (genre) genres.add(genre);
     if (!artistNorm) continue;
 
+    // Skip genres that should not be scored
     const genreLower = genre.toLowerCase();
     const skipGenre = SKIP_GENRES.some(g => genreLower.includes(g));
 
@@ -334,12 +348,16 @@ function runPrioritization() {
     if (!skipGenre && rank !== undefined) {
       score = 5;
       for (const [threshold, s] of RANK_THRESHOLDS) { if (rank <= threshold) { score = s; break; } }
+      // Tier cap
       const tier = tierMap.get(artistNorm) || '';
       if (tier.includes('1') && score > 1) score = 1;
       else if (tier.includes('2') && score > 2) score = 2;
+      // Genre bonus
       if (LOCAL_GENRES.some(g => genre.toLowerCase().includes(g))) score = Math.max(0, score - 1);
+      // Brazilian artist bonus
       const territory = territoryMap.get(artistNorm) || '';
       if (territory.includes('latam') || territory.includes('brazil') || territory.includes('br')) score = Math.max(0, score - 1);
+      // Apply manual override if exists
       const overrides = JSON.parse(localStorage.getItem('prioOverrides') || '{}');
       if (artistNorm in overrides) score = overrides[artistNorm];
       ranked++;
@@ -349,9 +367,12 @@ function runPrioritization() {
   }
 
   document.getElementById('stats').textContent = `${ranked} rankeados | ${notFound} sem score | ${results.length} total`;
+
+  // Populate genre filter
   const genreSelect = document.getElementById('filterGenre');
   genreSelect.innerHTML = '<option value="">Todos os Gêneros</option>';
   [...genres].sort().forEach(g => { genreSelect.innerHTML += `<option value="${g}">${g}</option>`; });
+
   sortCol = 0; sortAsc = true;
   renderTable();
 }
@@ -454,4 +475,229 @@ function updateFaceout(input) {
 function updatePlaylisting(input) {
   const idx = parseInt(input.dataset.idx);
   const r = results.find(r => r.idx === idx);
-  
+  if (r) r.playlisting = input.value;
+}
+
+function sortByPrio() { sortCol = 0; sortAsc = true; renderTable(); }
+
+function switchTab(tab) {
+  document.getElementById('pageCurrent').style.display = tab === 'current' ? '' : 'none';
+  document.getElementById('pageGospel').style.display = tab === 'gospel' ? '' : 'none';
+  document.getElementById('pageHistory').style.display = tab === 'history' ? '' : 'none';
+  document.getElementById('tabCurrent').className = tab === 'current' ? '' : 'secondary';
+  document.getElementById('tabGospel').className = tab === 'gospel' ? '' : 'secondary';
+  document.getElementById('tabHistory').className = tab === 'history' ? '' : 'secondary';
+  if (tab === 'history') renderHistory();
+  if (tab === 'gospel') renderGospelTable();
+}
+
+function showOverrides() {
+  const overrides = JSON.parse(localStorage.getItem('prioOverrides') || '{}');
+  const entries = Object.entries(overrides);
+  if (!entries.length) { alert('Nenhum override salvo.'); return; }
+  const msg = entries.map(([a, s]) => `${a} → ${s}`).join('\n');
+  if (confirm(`${entries.length} overrides salvos:\n\n${msg}\n\nDeseja limpar todos?`)) {
+    localStorage.removeItem('prioOverrides');
+    alert('Overrides removidos.');
+  }
+}
+
+function exportOverrides() {
+  const overrides = localStorage.getItem('prioOverrides') || '{}';
+  const blob = new Blob([overrides], {type: 'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'overrides.json'; a.click();
+}
+
+function importOverrides(input) {
+  const file = input.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const imported = JSON.parse(e.target.result);
+    const current = JSON.parse(localStorage.getItem('prioOverrides') || '{}');
+    const merged = { ...current, ...imported };
+    localStorage.setItem('prioOverrides', JSON.stringify(merged));
+    alert(`${Object.keys(imported).length} overrides importados!`);
+  };
+  reader.readAsText(file);
+}
+
+function sortBy(col) { if (sortCol === col) sortAsc = !sortAsc; else { sortCol = col; sortAsc = true; } renderTable(); }
+
+function getFiltered() {
+  const prio = document.getElementById('filterPrio').value;
+  const genre = document.getElementById('filterGenre').value;
+  const artist = normalize(document.getElementById('filterArtist').value);
+  return results.filter(r => {
+    if (prio === 'empty' && r.prio !== null) return false;
+    if (prio !== '' && prio !== 'empty' && r.prio !== parseInt(prio)) return false;
+    if (genre && r.genre !== genre) return false;
+    if (artist && !normalize(r.artist).includes(artist)) return false;
+    return true;
+  });
+}
+
+function applyFilters() { renderTable(); }
+
+function exportXLSX() {
+  if (!results.length) return;
+  const headers = ['Prio','Artist','Featured Artists','Title','Release Date','Genre','Secondary Genre','Other Genre','Vendor','Priority Track','Label Priority','Track ASIN','Album ASIN','UPC','Rank','Tier','Faceout','Playlisting'];
+  const sorted = [...results].sort((a,b) => (a.prio ?? 99) - (b.prio ?? 99));
+  const rows = sorted.map(r => [r.prio ?? '', r.artist, r.featuredArtists, r.title, r.releaseDate, r.genre, r.secondaryGenre, r.otherGenre, r.vendor, r.focusTrack, r.labelPriority, r.trackAsin, r.albumAsin, r.upc, r.rank || '', r.tier, r.faceout, r.playlisting]);
+
+  // Build XML spreadsheet (compatible with Excel)
+  let xml = '<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?>';
+  xml += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">';
+  xml += '<Worksheet ss:Name="Priorizacao"><Table>';
+  xml += '<Row>' + headers.map(h => `<Cell><Data ss:Type="String">${h}</Data></Cell>`).join('') + '</Row>';
+  rows.forEach(row => {
+    xml += '<Row>' + row.map(v => {
+      const type = typeof v === 'number' ? 'Number' : 'String';
+      return `<Cell><Data ss:Type="${type}">${String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</Data></Cell>`;
+    }).join('') + '</Row>';
+  });
+  xml += '</Table></Worksheet></Workbook>';
+
+  const blob = new Blob([xml], {type: 'application/vnd.ms-excel'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `priorizacao_${new Date().toISOString().slice(0,10)}.xls`; a.click();
+}
+
+function exportCSV() {
+  if (!results.length) return;
+  const headers = ['Prio','Artist','Featured Artists','Title','Release Date','Genre','Secondary Genre','Other Genre','Vendor','Priority Track','Label Priority','Track ASIN','Album ASIN','UPC','Rank','Tier','Faceout','Playlisting'];
+  const sorted2 = [...results].sort((a,b) => (a.prio ?? 99) - (b.prio ?? 99));
+  const lines = [headers.join(','), ...sorted2.map(r => [r.prio ?? '', `"${r.artist}"`, `"${r.featuredArtists}"`, `"${r.title}"`, r.releaseDate, `"${r.genre}"`, `"${r.secondaryGenre}"`, `"${r.otherGenre}"`, `"${r.vendor}"`, `"${r.focusTrack}"`, `"${r.labelPriority}"`, r.trackAsin, r.albumAsin, r.upc, r.rank || '', r.tier, `"${r.faceout}"`, `"${r.playlisting}"`].join(','))];
+  const blob = new Blob([lines.join('\n')], {type: 'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `priorizacao_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+}
+
+function resetAll() { maestroData = null; results = []; document.querySelectorAll('.upload-box')[0].classList.remove('loaded'); document.getElementById('maestroStatus').textContent = ''; document.getElementById('stats').textContent = ''; document.getElementById('resultsTable').innerHTML = '<thead><tr><th>Tabela aparecerá após calcular</th></tr></thead>'; document.getElementById('runBtn').disabled = true; checkReady(); }
+
+// --- GOSPEL ---
+const GOSPEL_GENRES = ["gospel","cristã","cristao","christian","worship"];
+
+function getGospelResults() {
+  return results.filter(r => {
+    const allGenres = [r.genre, r.secondaryGenre, r.otherGenre].join(' ').toLowerCase();
+    return GOSPEL_GENRES.some(g => allGenres.includes(g));
+  });
+}
+
+function renderGospelTable() {
+  const gospelData = getGospelResults().sort((a,b) => (a.prio ?? 99) - (b.prio ?? 99));
+  document.getElementById('gospelStats').textContent = `${gospelData.length} lançamentos gospel/cristã`;
+  const table = document.getElementById('gospelTable');
+  table.innerHTML = `<thead><tr>
+    <th>#</th><th>Prio</th><th>Artista</th><th>Featured</th><th>Title</th><th>Release Date</th>
+    <th>Gênero</th><th>Secondary</th><th>Other</th><th>Vendor</th><th>Priority Track</th>
+    <th>Label Prio</th><th>Track ASIN</th><th>Album ASIN</th><th>UPC</th><th>Rank</th><th>Tier</th>
+    <th>Faceout</th><th>Playlisting</th>
+  </tr></thead><tbody>` +
+  gospelData.map((r, i) => {
+    const prioClass = r.prio !== null ? `prio-${r.prio}` : 'prio-empty';
+    const tierBadge = r.tier.includes('1') ? '<span class="badge badge-tier1">T1</span>' :
+                      r.tier.includes('2') ? '<span class="badge badge-tier2">T2</span>' :
+                      r.tier ? '<span class="badge badge-tier3">T3</span>' : '';
+    return `<tr class="${prioClass}">
+      <td style="color:#666">${i+1}</td>
+      <td class="prio-cell"><input type="number" min="0" max="5" value="${r.prio ?? ''}" data-idx="${r.idx}" onchange="updatePrio(this)"></td>
+      <td>${r.artist}</td><td>${r.featuredArtists}</td>
+      <td>${r.title.replace(/<[^>]*>/g,'')}</td><td>${r.releaseDate}</td>
+      <td>${r.genre}</td><td>${r.secondaryGenre}</td><td>${r.otherGenre}</td>
+      <td>${r.vendor}</td><td>${r.focusTrack}</td><td>${r.labelPriority}</td>
+      <td style="font-size:0.7rem">${r.trackAsin}</td><td style="font-size:0.7rem">${r.albumAsin}</td>
+      <td style="font-size:0.7rem">${r.upc}</td><td>${r.rank||'—'}</td><td>${tierBadge}</td>
+      <td class="prio-cell"><input type="text" value="${r.faceout}" data-idx="${r.idx}" onchange="updateFaceout(this)" style="width:160px"></td>
+      <td class="prio-cell"><input type="text" value="${r.playlisting||''}" data-idx="${r.idx}" onchange="updatePlaylisting(this)" style="width:160px"></td>
+    </tr>`;
+  }).join('') + '</tbody>';
+}
+
+function exportGospelXLSX() {
+  const gospelData = getGospelResults().sort((a,b) => (a.prio ?? 99) - (b.prio ?? 99));
+  if (!gospelData.length) return;
+  const headers = ['Prio','Artist','Featured Artists','Title','Release Date','Genre','Secondary Genre','Other Genre','Vendor','Priority Track','Label Priority','Track ASIN','Album ASIN','UPC','Rank','Tier','Faceout','Playlisting'];
+  const rows = gospelData.map(r => [r.prio ?? '', r.artist, r.featuredArtists, r.title, r.releaseDate, r.genre, r.secondaryGenre, r.otherGenre, r.vendor, r.focusTrack, r.labelPriority, r.trackAsin, r.albumAsin, r.upc, r.rank || '', r.tier, r.faceout, r.playlisting]);
+  let xml = '<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?>';
+  xml += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">';
+  xml += '<Worksheet ss:Name="Gospel"><Table>';
+  xml += '<Row>' + headers.map(h => `<Cell><Data ss:Type="String">${h}</Data></Cell>`).join('') + '</Row>';
+  rows.forEach(row => { xml += '<Row>' + row.map(v => { const type = typeof v === 'number' ? 'Number' : 'String'; return `<Cell><Data ss:Type="${type}">${String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;')}</Data></Cell>`; }).join('') + '</Row>'; });
+  xml += '</Table></Worksheet></Workbook>';
+  const blob = new Blob([xml], {type: 'application/vnd.ms-excel'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `priorizacao_gospel_${new Date().toISOString().slice(0,10)}.xls`; a.click();
+}
+
+function exportGospelCSV() {
+  const gospelData = getGospelResults().sort((a,b) => (a.prio ?? 99) - (b.prio ?? 99));
+  if (!gospelData.length) return;
+  const headers = ['Prio','Artist','Featured Artists','Title','Release Date','Genre','Secondary Genre','Other Genre','Vendor','Priority Track','Label Priority','Track ASIN','Album ASIN','UPC','Rank','Tier','Faceout','Playlisting'];
+  const lines = [headers.join(','), ...gospelData.map(r => [r.prio ?? '', `"${r.artist}"`, `"${r.featuredArtists}"`, `"${r.title}"`, r.releaseDate, `"${r.genre}"`, `"${r.secondaryGenre}"`, `"${r.otherGenre}"`, `"${r.vendor}"`, `"${r.focusTrack}"`, `"${r.labelPriority}"`, r.trackAsin, r.albumAsin, r.upc, r.rank || '', r.tier, `"${r.faceout}"`, `"${r.playlisting}"`].join(','))];
+  const blob = new Blob([lines.join('\n')], {type: 'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `priorizacao_gospel_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+}
+
+// --- HISTORY ---
+function getHistory() { return JSON.parse(localStorage.getItem('weekHistory') || '{}'); }
+
+function saveWeek() {
+  if (!results.length) { alert('Nada para salvar. Calcule primeiro.'); return; }
+  const now = new Date();
+  const weekLabel = getWeekLabel(now);
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const history = getHistory();
+  if (!history[monthKey]) history[monthKey] = {};
+  history[monthKey][weekLabel] = results.map(r => ({
+    prio: r.prio, artist: r.artist, title: r.title, genre: r.genre,
+    focusTrack: r.focusTrack, trackAsin: r.trackAsin, albumAsin: r.albumAsin,
+    rank: r.rank, tier: r.tier, faceout: r.faceout
+  }));
+  localStorage.setItem('weekHistory', JSON.stringify(history));
+  alert(`Semana "${weekLabel}" salva!`);
+  renderHistory();
+}
+
+function getWeekLabel(date) {
+  const d = new Date(date); d.setHours(0,0,0,0);
+  d.setDate(d.getDate() - d.getDay()); // Sunday start
+  return `Sem ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+function renderHistory() {
+  const history = getHistory();
+  const months = Object.keys(history).sort().reverse();
+  if (!months.length) { return; }
+
+  const monthTabs = document.getElementById('monthTabs');
+  monthTabs.innerHTML = months.map((m, i) => `<button class="${i===0?'':'secondary'}" onclick="showMonth('${m}')" id="mtab-${m}">${m}</button>`).join('');
+  showMonth(months[0]);
+}
+
+function showMonth(monthKey) {
+  const history = getHistory();
+  document.querySelectorAll('#monthTabs button').forEach(b => b.className = 'secondary');
+  const tab = document.getElementById('mtab-' + monthKey);
+  if (tab) tab.className = '';
+
+  const weeks = Object.keys(history[monthKey] || {}).sort().reverse();
+  const weekTabsEl = document.getElementById('weekTabs');
+  weekTabsEl.innerHTML = weeks.map((w, i) => `<button class="${i===0?'':'secondary'}" onclick="showWeek('${monthKey}','${w}')" id="wtab-${w}">${w}</button>`).join('');
+  if (weeks.length) showWeek(monthKey, weeks[0]);
+}
+
+function showWeek(monthKey, weekKey) {
+  const history = getHistory();
+  document.querySelectorAll('#weekTabs button').forEach(b => b.className = 'secondary');
+  const tab = document.getElementById('wtab-' + weekKey);
+  if (tab) tab.className = '';
+
+  const data = history[monthKey][weekKey] || [];
+  const table = document.getElementById('historyTable');
+  table.innerHTML = `<thead><tr><th>#</th><th>Prio</th><th>Artista</th><th>Title</th><th>Gênero</th><th>Priority Track</th><th>Rank</th><th>Tier</th><th>Faceout</th></tr></thead><tbody>` +
+    data.sort((a,b) => (a.prio??99)-(b.prio??99)).map((r, i) => `<tr class="${r.prio !== null ? 'prio-'+r.prio : 'prio-empty'}">
+      <td style="color:#666">${i+1}</td><td>${r.prio ?? ''}</td><td>${r.artist}</td><td>${r.title}</td><td>${r.genre}</td><td>${r.focusTrack}</td><td>${r.rank||'—'}</td><td>${r.tier}</td><td>${r.faceout}</td></tr>`).join('') + '</tbody>';
+}
+
+
+</script>
+</body>
+</html>
