@@ -133,7 +133,7 @@ tr:hover { background: #1a2733; }
 </div>
 
 <script>
-let maestroData = null, streamsData = null, results = [], sortCol = 0, sortAsc = true;
+let maestroData = null, streamsData = null, results = [], gospelResults = [], sortCol = 0, sortAsc = true;
 
 function clearStreams() {
   localStorage.removeItem('streamsData');
@@ -325,6 +325,7 @@ function runPrioritization() {
 
   // Process pitches
   results = [];
+  gospelResults = [];
   let ranked = 0, notFound = 0;
   const genres = new Set();
 
@@ -341,6 +342,10 @@ function runPrioritization() {
     // Skip genres that should not be scored
     const genreLower = genre.toLowerCase();
     const skipGenre = SKIP_GENRES.some(g => genreLower.includes(g));
+
+    // Check if gospel/christian (will go to separate tab)
+    const allGenres = [genre, row[maestroCols.secondaryGenre] || '', row[maestroCols.otherGenre] || ''].join(' ').toLowerCase();
+    const isGospel = GOSPEL_GENRES.some(g => allGenres.includes(g));
 
     const rank = rankMap.get(artistNorm);
     let score = null;
@@ -363,7 +368,8 @@ function runPrioritization() {
       ranked++;
     } else { notFound++; }
 
-    results.push({ idx: i, prio: score, artist: artistRaw, genre, rank: rank || null, tier: tierMap.get(artistNorm) || '', title: (row[maestroCols.title] || '').replace(/<[^>]*>/g, ''), focusTrack: row[maestroCols.focusTrack] || '', trackAsin: row[maestroCols.trackAsin] || '', albumAsin: row[maestroCols.albumAsin] || '', labelPriority: row[maestroCols.labelPriority] || '', vendor: row[maestroCols.vendor] || '', featuredArtists: row[maestroCols.featuredArtists] || '', releaseDate: row[maestroCols.releaseDate] || '', secondaryGenre: row[maestroCols.secondaryGenre] || '', otherGenre: row[maestroCols.otherGenre] || '', upc: row[maestroCols.upc] || '', faceout: '', playlisting: '', row });
+    const entry = { idx: i, prio: score, artist: artistRaw, genre, rank: rank || null, tier: tierMap.get(artistNorm) || '', title: (row[maestroCols.title] || '').replace(/<[^>]*>/g, ''), focusTrack: row[maestroCols.focusTrack] || '', trackAsin: row[maestroCols.trackAsin] || '', albumAsin: row[maestroCols.albumAsin] || '', labelPriority: row[maestroCols.labelPriority] || '', vendor: row[maestroCols.vendor] || '', featuredArtists: row[maestroCols.featuredArtists] || '', releaseDate: row[maestroCols.releaseDate] || '', secondaryGenre: row[maestroCols.secondaryGenre] || '', otherGenre: row[maestroCols.otherGenre] || '', upc: row[maestroCols.upc] || '', faceout: '', playlisting: '', row };
+    if (isGospel) { gospelResults.push(entry); } else { results.push(entry); }
   }
 
   document.getElementById('stats').textContent = `${ranked} rankeados | ${notFound} sem score | ${results.length} total`;
@@ -570,16 +576,13 @@ function exportCSV() {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `priorizacao_${new Date().toISOString().slice(0,10)}.csv`; a.click();
 }
 
-function resetAll() { maestroData = null; results = []; document.querySelectorAll('.upload-box')[0].classList.remove('loaded'); document.getElementById('maestroStatus').textContent = ''; document.getElementById('stats').textContent = ''; document.getElementById('resultsTable').innerHTML = '<thead><tr><th>Tabela aparecerá após calcular</th></tr></thead>'; document.getElementById('runBtn').disabled = true; checkReady(); }
+function resetAll() { maestroData = null; results = []; gospelResults = []; document.querySelectorAll('.upload-box')[0].classList.remove('loaded'); document.getElementById('maestroStatus').textContent = ''; document.getElementById('stats').textContent = ''; document.getElementById('resultsTable').innerHTML = '<thead><tr><th>Tabela aparecerá após calcular</th></tr></thead>'; document.getElementById('runBtn').disabled = true; checkReady(); }
 
 // --- GOSPEL ---
 const GOSPEL_GENRES = ["gospel","cristã","cristao","christian","worship"];
 
 function getGospelResults() {
-  return results.filter(r => {
-    const allGenres = [r.genre, r.secondaryGenre, r.otherGenre].join(' ').toLowerCase();
-    return GOSPEL_GENRES.some(g => allGenres.includes(g));
-  });
+  return gospelResults;
 }
 
 function renderGospelTable() {
